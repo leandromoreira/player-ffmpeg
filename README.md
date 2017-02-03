@@ -10,7 +10,7 @@ https://www.ffmpeg.org/doxygen/3.2/index.html
 
 ## Basic terminology
 
-* Container - a wrapper, providing sync, metadata and muxing for the streams.
-* Stream - a continuous stream (audio and video) of data over time, the data itself are the frames, each stream is encoded by a different codec.
-* Codec - defines how data are COded and DECoded.
-* Packet - are the data decoded as raw frames (for this simple explanation), one frame for video and multiple for audio.
+* **Container** - a wrapper, providing sync, metadata and muxing for the streams.
+* **Stream** - a continuous stream (audio and video) of data over time, the data itself are the frames, each stream is encoded by a different codec.
+* **Codec** - defines how data are COded and DECoded.
+* **Packet** - are the data decoded as raw frames (for this simple explanation), one frame for video and multiple for audio.
