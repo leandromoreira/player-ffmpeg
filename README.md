@@ -2,7 +2,7 @@
 
 This follows the tutorial on http://dranger.com/ffmpeg/tutorial01.html but using a most up to date ffmpeg libraries. (ie: ffmpeg/swscale become libswscale/swscale)
 
-This was tested with `MacOSx 10.12.3`, `ffmpeg 3.2.2` and `GCC stable 6.3.0`.
+This was tested with `MacOSx 10.12.3`, `ffmpeg 3.2.2` and `GCC stable 6.3.0` but I think you can run it on linux and even windows (with a few caveats).
 
 ## FFmpeg API documentation for this version
 
