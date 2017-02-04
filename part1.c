@@ -15,6 +15,28 @@
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 
+void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame) {
+  FILE *pFile;
+  char szFilename[32];
+  int  y;
+
+  // Open file
+  sprintf(szFilename, "frame%d.ppm", iFrame);
+  pFile=fopen(szFilename, "wb");
+  if(pFile==NULL)
+    return;
+
+  // Write header
+  fprintf(pFile, "P6\n%d %d\n255\n", width, height);
+
+  // Write pixel data
+  for(y=0; y<height; y++)
+    fwrite(pFrame->data[0]+y*pFrame->linesize[0], 1, width*3, pFile);
+
+  // Close file
+  fclose(pFile);
+}
+
 int main(int argc, const char *argv[])
 {
   // registering all the formats (containers), codecs and protocols.
@@ -34,13 +56,156 @@ int main(int argc, const char *argv[])
 
   // Read packets of a media file to get stream information.
   // this function populates pFormatCtx->streams (of size equals to pFormatCtx->nb_streams)
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavf__decoding.html#gad42172e27cddafb81096939783b157bb
   if (avformat_find_stream_info(pFormatCtx, NULL) < 0)
   {
     return -1;
   }
 
-  // show debug info about the format onto standard error fd
+  // Print detailed information about the input or output format, such as duration, bitrate, streams, container, programs, metadata, side data, codec and time base.
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavf__misc.html#gae2645941f2dc779c307eb6314fd39f10
   av_dump_format(pFormatCtx, 0, argv[1], 0);
+
+  int i;
+  // https://www.ffmpeg.org/doxygen/3.2/structAVCodecContext.html
+  AVCodecContext *pCodecCtxOrig = NULL;
+  AVCodecContext *pCodecCtx = NULL;
+
+  int videoStream = -1;
+
+  // Find the first video stream
+  for (i = 0; i < pFormatCtx->nb_streams; i++)
+  {
+    if (pFormatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+    {
+      videoStream = i;
+      break;
+    }
+  }
+
+  if (videoStream==-1)
+  {
+    return -1;
+  }
+
+  // get a pointer to the codec context for the video stream
+  pCodecCtxOrig = pFormatCtx->streams[videoStream]->codec;
+
+  // https://www.ffmpeg.org/doxygen/3.2/structAVCodec.html
+  AVCodec *pCodec = NULL;
+
+  // Find a registered decoder with a matching codec ID.
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavc__decoding.html#ga19a0ca553277f019dd5b0fec6e1f9dca
+  pCodec = avcodec_find_decoder(pCodecCtxOrig->codec_id);
+
+  if (pCodec==NULL)
+  {
+    fprintf(stderr, "Unsupported codec!\n");
+    return -1;
+  }
+
+  // Allocate an AVCodecContext and set its fields to default values.
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavc__core.html#gae80afec6f26df6607eaacf39b561c315
+  pCodecCtx = avcodec_alloc_context3(pCodec);
+
+  // Copy the settings of the source AVCodecContext into the destination AVCodecContext.
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavc__core.html#gae381631ba4fb14f4124575d9ceacb87eO
+  // Deprectated
+  if (avcodec_copy_context(pCodecCtx, pCodecCtxOrig) != 0)
+  {
+    fprintf(stderr, "Couldn't copy the codec context");
+    return -1;
+  }
+
+  // Initialize the AVCodecContext to use the given AVCodec.
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavc__core.html#ga11f785a188d7d9df71621001465b0f1d
+  if (avcodec_open2(pCodecCtx, pCodec, NULL) < 0)
+  {
+    return -1;
+  }
+
+  AVFrame *pFrame = NULL;
+  AVFrame *pFrameRGB = NULL;
+  // Allocate an AVFrame and set its fields to default values.
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavu__frame.html#gac700017c5270c79c1e1befdeeb008b2f
+  pFrame = av_frame_alloc();
+  pFrameRGB = av_frame_alloc();
+
+  if (pFrameRGB == NULL || pFrame == NULL)
+  {
+    fprintf(stderr, "Couldn't allocate memory for the frame");
+    return -1;
+  }
+
+  uint8_t *buffer = NULL;
+
+  int numBytes;
+
+  // Return the size in bytes of the amount of data required to store an image with the given parameters
+  // https://www.ffmpeg.org/doxygen/3.2/group__lavu__picture.html#ga24a67963c3ae0054a2a4bab35930e694
+  numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height);
+
+  // allocates memory
+  // https://www.ffmpeg.org/doxygen/3.2/tableprint__vlc_8h.html#ae97db1f58b6b1515ed57a83bea3dd572
+  buffer = (uint8_t *) av_malloc(numBytes * sizeof(uint8_t));
+
+
+  avpicture_fill((AVPicture *)pFrameRGB, buffer, AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height);
+
+  struct SwsContext *sws_ctx = NULL;
+  int frameFinished;
+  AVPacket packet;
+
+  // initialize SWS context for software scaling
+  //
+  sws_ctx = sws_getContext(pCodecCtx->width,
+      pCodecCtx->height,
+      pCodecCtx->pix_fmt,
+      pCodecCtx->width,
+      pCodecCtx->height,
+      AV_PIX_FMT_RGB24,
+      SWS_BILINEAR,
+      NULL,
+      NULL,
+      NULL
+      );
+
+  i=0;
+
+  while(av_read_frame(pFormatCtx, &packet) >= 0)
+  {
+    if (packet.stream_index == videoStream)
+    {
+      avcodec_decode_video2(pCodecCtx, pFrame, &frameFinished, &packet);
+    }
+
+    if (frameFinished)
+    {
+      //convert from yuv420 to 24b rgb
+      sws_scale(sws_ctx, (uint8_t const * const *)pFrame->data,
+          pFrame->linesize, 0, pCodecCtx->height,
+          pFrameRGB->data, pFrameRGB->linesize);
+      if(++i<=5)
+        SaveFrame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, i);
+    }
+
+    // Free the packet that was allocated by av_read_frame
+    av_free_packet(&packet);
+  }
+
+  // Free the RGB image
+  av_free(buffer);
+  av_free(pFrameRGB);
+
+  // Free the YUV frame
+  av_free(pFrame);
+
+  // Close the codecs
+  avcodec_close(pCodecCtx);
+  avcodec_close(pCodecCtxOrig);
+
+  // Close the video file
+  avformat_close_input(&pFormatCtx);
 
   return 0;
 }
