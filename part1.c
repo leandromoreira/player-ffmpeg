@@ -177,6 +177,7 @@ int main(int argc, const char *argv[])
       if(++i<=1)
       {
         SaveFrame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, i);
+        logg("releasing frame");
         av_free_packet(&packet);
         break;
       }
