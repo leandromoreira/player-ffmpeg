@@ -5,37 +5,18 @@
  *
  * https://www.ffmpeg.org/doxygen/3.2/index.html
  *
- * Container - a wrapper, providing sync, metadata and muxing for the streams.
+ * Container (Format) - a wrapper, providing sync, metadata and muxing for the streams.
  * Stream - a continuous stream (audio and video) of data over time, the data itself are the frames, each stream is encoded by a different codec.
  * Codec - defines how data are COded and DECoded.
  * Packet - are the data decoded as raw frames (for this simple explanation), one frame for video and multiple for audio.
+ * Frame - a decoded raw frame
  */
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 
-void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame) {
-  FILE *pFile;
-  char szFilename[32];
-  int  y;
-
-  // Open file
-  sprintf(szFilename, "frame%d.ppm", iFrame);
-  pFile=fopen(szFilename, "wb");
-  if(pFile==NULL)
-    return;
-
-  // Write header
-  fprintf(pFile, "P6\n%d %d\n255\n", width, height);
-
-  // Write pixel data
-  for(y=0; y<height; y++)
-    fwrite(pFrame->data[0]+y*pFrame->linesize[0], 1, width*3, pFile);
-
-  // Close file
-  fclose(pFile);
-}
+void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame);
 
 int main(int argc, const char *argv[])
 {
@@ -46,6 +27,20 @@ int main(int argc, const char *argv[])
   // holds container header info
   // https://www.ffmpeg.org/doxygen/3.2/structAVFormatContext.html
   AVFormatContext *pFormatCtx = NULL;
+  int i;
+  // https://www.ffmpeg.org/doxygen/3.2/structAVCodecContext.html
+  AVCodecContext *pCodecCtxOrig = NULL;
+  AVCodecContext *pCodecCtx = NULL;
+  int videoStream = -1;
+  // https://www.ffmpeg.org/doxygen/3.2/structAVCodec.html
+  AVCodec *pCodec = NULL;
+  AVFrame *pFrame = NULL;
+  AVFrame *pFrameRGB = NULL;
+  uint8_t *buffer = NULL;
+  int numBytes;
+  struct SwsContext *sws_ctx = NULL;
+  int frameFinished;
+  AVPacket packet;
 
   // Open an input stream and read the header. The codecs are not opened.
   // https://www.ffmpeg.org/doxygen/3.2/group__lavf__decoding.html#ga31d601155e9035d5b0e7efedc894ee49
@@ -66,13 +61,6 @@ int main(int argc, const char *argv[])
   // https://www.ffmpeg.org/doxygen/3.2/group__lavf__misc.html#gae2645941f2dc779c307eb6314fd39f10
   av_dump_format(pFormatCtx, 0, argv[1], 0);
 
-  int i;
-  // https://www.ffmpeg.org/doxygen/3.2/structAVCodecContext.html
-  AVCodecContext *pCodecCtxOrig = NULL;
-  AVCodecContext *pCodecCtx = NULL;
-
-  int videoStream = -1;
-
   // Find the first video stream
   for (i = 0; i < pFormatCtx->nb_streams; i++)
   {
@@ -90,9 +78,6 @@ int main(int argc, const char *argv[])
 
   // get a pointer to the codec context for the video stream
   pCodecCtxOrig = pFormatCtx->streams[videoStream]->codec;
-
-  // https://www.ffmpeg.org/doxygen/3.2/structAVCodec.html
-  AVCodec *pCodec = NULL;
 
   // Find a registered decoder with a matching codec ID.
   // https://www.ffmpeg.org/doxygen/3.2/group__lavc__decoding.html#ga19a0ca553277f019dd5b0fec6e1f9dca
@@ -124,8 +109,6 @@ int main(int argc, const char *argv[])
     return -1;
   }
 
-  AVFrame *pFrame = NULL;
-  AVFrame *pFrameRGB = NULL;
   // Allocate an AVFrame and set its fields to default values.
   // https://www.ffmpeg.org/doxygen/3.2/group__lavu__frame.html#gac700017c5270c79c1e1befdeeb008b2f
   pFrame = av_frame_alloc();
@@ -137,10 +120,6 @@ int main(int argc, const char *argv[])
     return -1;
   }
 
-  uint8_t *buffer = NULL;
-
-  int numBytes;
-
   // Return the size in bytes of the amount of data required to store an image with the given parameters
   // https://www.ffmpeg.org/doxygen/3.2/group__lavu__picture.html#ga24a67963c3ae0054a2a4bab35930e694
   numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height);
@@ -149,15 +128,9 @@ int main(int argc, const char *argv[])
   // https://www.ffmpeg.org/doxygen/3.2/tableprint__vlc_8h.html#ae97db1f58b6b1515ed57a83bea3dd572
   buffer = (uint8_t *) av_malloc(numBytes * sizeof(uint8_t));
 
-
   avpicture_fill((AVPicture *)pFrameRGB, buffer, AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height);
 
-  struct SwsContext *sws_ctx = NULL;
-  int frameFinished;
-  AVPacket packet;
-
   // initialize SWS context for software scaling
-  //
   sws_ctx = sws_getContext(pCodecCtx->width,
       pCodecCtx->height,
       pCodecCtx->pix_fmt,
@@ -208,4 +181,26 @@ int main(int argc, const char *argv[])
   avformat_close_input(&pFormatCtx);
 
   return 0;
+}
+
+void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame) {
+  FILE *pFile;
+  char szFilename[32];
+  int  y;
+
+  // Open file
+  sprintf(szFilename, "frame%d.ppm", iFrame);
+  pFile=fopen(szFilename, "wb");
+  if(pFile==NULL)
+    return;
+
+  // Write header
+  fprintf(pFile, "P6\n%d %d\n255\n", width, height);
+
+  // Write pixel data
+  for(y=0; y<height; y++)
+    fwrite(pFrame->data[0]+y*pFrame->linesize[0], 1, width*3, pFile);
+
+  // Close file
+  fclose(pFile);
 }
